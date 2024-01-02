@@ -517,7 +517,7 @@ class DMET(object):
             }
             res_list.append(resv)
             vcor_grad_lo = self.get_vcor_grad_lo(vcor_params_lo, vcor_lo, fock_lo=f_lo, dm_hl_lo=dm_hl_lo, dm_ll_lo=dm_ll_lo)
-            log.info("iter vocr fitting = %4d, dm_err = % 10.8e, |grad| = % 10.8e", self.vcor_iter, dm_err, numpy.linalg.norm(vcor_grad_lo))
+            log.info("iter vocr fitting = %4d, dm_err = %6.4e, |grad| = %6.4e", self.vcor_iter, dm_err, numpy.linalg.norm(vcor_grad_lo))
             return dm_err, vcor_grad_lo
 
         if vcor_fitting_options is None:
@@ -578,7 +578,7 @@ class DMET(object):
             nparam   = tril_idx[0].size
             param_count  += nparam
 
-        vcor_params_lo_old =numpy.ones((param_count,))
+        vcor_params_lo_old = 0.1 * numpy.ones((param_count,))
         log = logger.new_logger(self, self.verbose)
         for icycle in range(self.vcor_max_cycle):
             log.info("iter cycle = %2d", icycle+1)
@@ -1054,9 +1054,7 @@ class RHF(DMET):
         return vcor_ao, vcor_lo
 
     def square2flat(self, vcor_lo, vcor_parm_lo):
-        """Get the correlation potential from the vcor parameters (parameters in LO).
-        Return the correlation potential in both AO and LO basis.
-        """
+
         nfrag = self.nfrag
         imp_lo_idx_list = self.imp_lo_idx_list
 
