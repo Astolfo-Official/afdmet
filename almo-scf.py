@@ -8,11 +8,62 @@ TOL = os.environ.get("TOL", 1e-8)
 # to the convergence threshold of the HF solver, please make sure that the HF
 # solver is converged to a very high accuracy.
 
-def build(basis="sto3g"):
+def build(atoms, charge, basis="sto3g", xcf='hf'):
 
     mol = pyscf.gto.Mole()
     mol.build(
-        atom = """
+        atom = atoms,
+        charge = charge,
+        basis = basis,
+        verbose=0
+    )
+    
+    mf = pyscf.scf.RKS(mol)
+    mf.verbose = 0
+    mf.max_cycle = 100
+    mf.conv_tol  = TOL
+    mf.conv_tol_grad = TOL
+    mf.xc = xcf
+    
+    return mol, mf
+
+def fragment(atoms, charge, basis="sto3g", xcf='hf'):
+
+    mol = pyscf.gto.Mole()
+    mol.build(
+        atom = atoms,
+        charge = charge,
+        basis = basis,
+        verbose=0
+    )
+
+    mf = pyscf.scf.RKS(mol)
+    mf.verbose = 0
+    mf.max_cycle = 100
+    mf.conv_tol  = TOL
+    mf.conv_tol_grad = TOL
+    mf.xc = xcf
+    mf.kernel()
+
+    return mf.mo_coeff, mf.mo_occ
+
+def get_ao(mol, frag_atms_list):
+    ao_slice_by_atom = mol.aoslice_by_atom()
+    imp_atom = frag_atms_list[0]
+    imp_end = ao_slice_by_atom[imp_atom[-1],3]
+    imp_ao = range(0, imp_end)
+    env_end = ao_slice_by_atom[-1,3]
+    env_ao = range(imp_end,env_end)
+    return imp_ao, env_ao
+
+def get_dm(coeff, ovlp):
+    CSC = numpy.einsum('ji,jk,kl->il', coeff, ovlp, coeff, optimize=True)
+    CSC_inv = numpy.linalg.inv(CSC)
+    dm = 2 * numpy.einsum('ij,jk,lk->il', coeff, CSC_inv, coeff, optimize=True)
+    return dm
+
+numpy.set_printoptions(precision=4)
+atoms = '''
  C                 -3.08628339    1.03982299    0.00000000
  H                 -2.72962896    0.03101299    0.00000000
  H                 -2.72961055    1.54422118    0.87365150
@@ -23,88 +74,26 @@ def build(basis="sto3g"):
  H                  0.43410647   -0.22569029    0.87365150
  H                  0.43410647   -0.22569029   -0.87365150
  H                 -0.99256637   -0.73007530    0.00000000
-        """,
-        basis = basis,
-        verbose=0
-    )
-
-    frag_atms_list   = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
-    
-    mf = pyscf.scf.RHF(mol)
-    mf.verbose = 0
-    mf.max_cycle = 100
-    mf.conv_tol  = TOL
-    mf.conv_tol_grad = TOL
-    #mf.kernel()
-
-    return mol, mf, frag_atms_list
-
-def fragment(atoms, charge, basis="sto3g"):
-
-    mol = pyscf.gto.Mole()
-    mol.build(
-        atom = atoms,
-        charge = charge,
-        basis = basis,
-        verbose=0
-    )
-
-    mf = pyscf.scf.RHF(mol)
-    mf.verbose = 0
-    mf.max_cycle = 100
-    mf.conv_tol  = TOL
-    mf.conv_tol_grad = TOL
-    mf.kernel()
-
-    return mf.mo_coeff, mf.mo_occ
-
-def get_ao(mol, frag_atms_list):
-
-    ao_slice_by_atom = mol.aoslice_by_atom()
-
-    imp_atom = frag_atms_list[0]
-    env_atom = frag_atms_list[1]
-    imp_ao = []
-    env_ao = []
-
-    for i in imp_atom :
-        ao_start, ao_end = ao_slice_by_atom[i,2:4]
-        for j in range(ao_start,ao_end):
-            imp_ao.append(j)
-
-    for i in env_atom :
-        ao_start, ao_end = ao_slice_by_atom[i,2:4]
-        for j in range(ao_start,ao_end):
-            env_ao.append(j)
-    return imp_ao, env_ao
-
-def get_dm(coeff, ovlp):
-    CSC = numpy.einsum('ji,jk,kl->il', coeff, ovlp, coeff, optimize=True)
-    CSC_inv = numpy.linalg.inv(CSC)
-    dm = 2 * numpy.einsum('ij,jk,lk->il', coeff, CSC_inv, coeff, optimize=True)
-    return dm
-
-numpy.set_printoptions(precision=4)
-mol, mf, frag_atms_list = build(basis="sto3g")
-atom = mol.atom.split()
-imp_atom = ''
-env_atom = ''
-for i in frag_atms_list[0] :
-    imp_atom += atom[4*i] + ' '
-    imp_atom += atom[4*i+1] + ' '
-    imp_atom += atom[4*i+2] + ' '
-    imp_atom += atom[4*i+3]
-    imp_atom += '\n'
-for i in frag_atms_list[1] :
-    env_atom += atom[4*i] + ' '
-    env_atom += atom[4*i+1] + ' '
-    env_atom += atom[4*i+2] + ' '
-    env_atom += atom[4*i+3]
-    env_atom += '\n'
-
+'''
+imp_atom = '''
+ C                 -3.08628339    1.03982299    0.00000000
+ H                 -2.72962896    0.03101299    0.00000000
+ H                 -2.72961055    1.54422118    0.87365150
+ H                 -2.72961055    1.54422118   -0.87365150
+ H                 -4.15628339    1.03983618    0.00000000
+ '''
+env_atom = '''
+ C                  0.07743363   -0.73008848    0.00000000
+ H                  0.43408806   -1.73889849    0.00000000
+ H                  0.43410647   -0.22569029    0.87365150
+ H                  0.43410647   -0.22569029   -0.87365150
+ H                 -0.99256637   -0.73007530    0.00000000
+'''
+frag_atms_list   = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+mol, mf = build(atoms=atoms, charge=0, basis="6-31g*", xcf='wb97xd')
 imp_ao, env_ao = get_ao(mol, frag_atms_list)
-coeffa, mo_occa = fragment(atoms=imp_atom, charge=0, basis=mol.basis)
-coeffe, mo_occe = fragment(atoms=env_atom, charge=0, basis=mol.basis)
+coeffa, mo_occa = fragment(atoms=imp_atom, charge=0, basis=mol.basis, xcf=mf.xc)
+coeffe, mo_occe = fragment(atoms=env_atom, charge=0, basis=mol.basis, xcf=mf.xc)
 
 nimp = len(imp_ao)
 nenv = len(env_ao)
@@ -129,7 +118,7 @@ ovlp_ae = ovlp[imp_ao,:][:,env_ao]
 ovlp_ea = ovlp[env_ao,:][:,imp_ao]
 ovlp_ee = ovlp[env_ao,:][:,env_ao]
 
-maxcycle = 50
+maxcycle = 100
 tol = 1e-6
 
 for icycle in range(maxcycle):
@@ -137,8 +126,8 @@ for icycle in range(maxcycle):
     dma = get_dm(coeffa[:,occidxa], ovlp_aa)
     dme = get_dm(coeffe[:,occidxe], ovlp_ee)
     
-    ovlpa = ovlp_aa - numpy.einsum('ij,jk,kl->', ovlp_ae, dme, ovlp_ea, optimize=True)
-    ovlpe = ovlp_ee - numpy.einsum('ij,jk,kl->', ovlp_ea, dma, ovlp_ae, optimize=True)
+    ovlpa = ovlp_aa - numpy.einsum('ij,jk,kl->il', ovlp_ae, dme, ovlp_ea, optimize=True)
+    ovlpe = ovlp_ee - numpy.einsum('ij,jk,kl->il', ovlp_ea, dma, ovlp_ae, optimize=True)
 
     Ta  = numpy.hstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', ovlp_ae, dme, optimize=True)))
     Tat = numpy.vstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', dme, ovlp_ea, optimize=True)))
