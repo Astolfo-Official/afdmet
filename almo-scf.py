@@ -2,12 +2,6 @@ import numpy
 from scipy.linalg import eigh
 import pyscf, os
 
-TOL = os.environ.get("TOL", 1e-8)
-
-# Take care that the finite difference calculation of dn_dmu is super-sensitive
-# to the convergence threshold of the HF solver, please make sure that the HF
-# solver is converged to a very high accuracy.
-
 def build(atoms, charge, basis="sto3g", xcf='hf'):
 
     mol = pyscf.gto.Mole()
@@ -24,6 +18,7 @@ def build(atoms, charge, basis="sto3g", xcf='hf'):
     mf.conv_tol  = TOL
     mf.conv_tol_grad = TOL
     mf.xc = xcf
+    mf.kernel()
     
     return mol, mf
 
@@ -59,7 +54,7 @@ def get_ao(mol, frag_atms_list):
 def get_dm(coeff, ovlp):
     CSC = numpy.einsum('ji,jk,kl->il', coeff, ovlp, coeff, optimize=True)
     CSC_inv = numpy.linalg.inv(CSC)
-    dm = 2 * numpy.einsum('ij,jk,lk->il', coeff, CSC_inv, coeff, optimize=True)
+    dm = numpy.einsum('ij,jk,lk->il', coeff, CSC_inv, coeff, optimize=True)
     return dm
 
 numpy.set_printoptions(precision=4)
@@ -90,7 +85,8 @@ env_atom = '''
  H                 -0.99256637   -0.73007530    0.00000000
 '''
 frag_atms_list   = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
-mol, mf = build(atoms=atoms, charge=0, basis="6-31g*", xcf='wb97xd')
+TOL = os.environ.get("TOL", 1e-6)
+mol, mf = build(atoms=atoms, charge=0, basis="6-311++g**", xcf='wb97xd')
 imp_ao, env_ao = get_ao(mol, frag_atms_list)
 coeffa, mo_occa = fragment(atoms=imp_atom, charge=0, basis=mol.basis, xcf=mf.xc)
 coeffe, mo_occe = fragment(atoms=env_atom, charge=0, basis=mol.basis, xcf=mf.xc)
@@ -119,7 +115,6 @@ ovlp_ea = ovlp[env_ao,:][:,imp_ao]
 ovlp_ee = ovlp[env_ao,:][:,env_ao]
 
 maxcycle = 100
-tol = 1e-6
 
 for icycle in range(maxcycle):
 
@@ -128,14 +123,14 @@ for icycle in range(maxcycle):
     
     ovlpa = ovlp_aa - numpy.einsum('ij,jk,kl->il', ovlp_ae, dme, ovlp_ea, optimize=True)
     ovlpe = ovlp_ee - numpy.einsum('ij,jk,kl->il', ovlp_ea, dma, ovlp_ae, optimize=True)
-
-    Ta  = numpy.hstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', ovlp_ae, dme, optimize=True)))
-    Tat = numpy.vstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', dme, ovlp_ea, optimize=True)))
+   
+    Ta    = numpy.hstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', ovlp_ae, dme, optimize=True)))
+    Tat   = numpy.vstack((numpy.eye(nimp), -numpy.einsum('ij,jk->ik', dme, ovlp_ea, optimize=True)))
     focka = numpy.einsum('ij,jk,kl->il', Ta, fock, Tat, optimize=True)
-    Te  = numpy.hstack((-numpy.einsum('ij,jk->ik', ovlp_ea, dma, optimize=True), numpy.eye(nenv)))
-    Tet = numpy.vstack((-numpy.einsum('ij,jk->ik', dma, ovlp_ae, optimize=True), numpy.eye(nenv)))
+    Te    = numpy.hstack((-numpy.einsum('ij,jk->ik', ovlp_ea, dma, optimize=True), numpy.eye(nenv)))
+    Tet   = numpy.vstack((-numpy.einsum('ij,jk->ik', dma, ovlp_ae, optimize=True), numpy.eye(nenv)))
     focke = numpy.einsum('ij,jk,kl->il', Te, fock, Tet, optimize=True)
-
+    
     energya, coeffa = eigh(focka, ovlpa)
     energye, coeffe = eigh(focke, ovlpe)
 
@@ -143,13 +138,15 @@ for icycle in range(maxcycle):
     coeff[imp_imp_ix] = coeffa
     coeff[env_env_ix] = coeffe
 
-    dm = get_dm(coeff[:,occidx], ovlp)
+    dm = 2 * get_dm(coeff[:,occidx], ovlp)
     fock = mf.get_fock(dm=dm)
 
     delta = numpy.linalg.norm(dm-dm0)
     Etot  = 0.5 * numpy.einsum('ij,ji->', dm, fock + hcore, optimize=True)
-    if delta < tol :
+    if delta < TOL :
         print(f'Cycle {icycle+1:2d} converage, delta dm = {delta:10.5g}, Etot = {Etot:16.10f} Hartree')
         break
     print(f'Cycle {icycle+1:2d}, delta dm = {delta:10.5g}, Etot = {Etot:16.10f} Hartree')
     dm0 = dm
+
+print(f'ref SCF = {mf.energy_elec()[0]:16.10f} Hartree')
